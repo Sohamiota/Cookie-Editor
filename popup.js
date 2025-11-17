@@ -8,7 +8,7 @@ function escapeHtml(text) {
 
 function showError(message) {
   const errorDiv = document.getElementById('error');
-  errorDiv.style.display = 'block';
+  errorDiv.style.display = message ? 'block' : 'none';
   errorDiv.textContent = message;
 }
 
@@ -30,41 +30,28 @@ async function loadCookies() {
       return;
     }
 
-    const url = new URL(tab.url);
-    const domain = url.hostname;
+    const domain = new URL(tab.url).hostname;
     let cookies = [];
 
-    try {
-      cookies = await getAllCookies({ url: tab.url });
-    } catch (error) {
-      // Continue to next method
-    }
-
-    if (cookies.length === 0) {
-      try {
-        cookies = await getAllCookies({ domain });
-      } catch (error) {
-        // Continue to next method
-      }
-    }
-
-    if (cookies.length === 0) {
-      try {
-        cookies = await getAllCookies({ domain: '.' + domain });
-      } catch (error) {
-        // Continue to next method
-      }
-    }
-
-    if (cookies.length === 0) {
-      try {
+    const methods = [
+      () => getAllCookies({ url: tab.url }),
+      () => getAllCookies({ domain }),
+      () => getAllCookies({ domain: '.' + domain }),
+      async () => {
         const all = await getAllCookies({});
-        cookies = all.filter(cookie => {
+        return all.filter(cookie => {
           const cookieDomain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
           return cookieDomain === domain || domain.endsWith(cookieDomain);
         });
+      }
+    ];
+
+    for (const method of methods) {
+      try {
+        cookies = await method();
+        if (cookies.length > 0) break;
       } catch (error) {
-        // Continue
+        continue;
       }
     }
 
@@ -77,6 +64,7 @@ async function loadCookies() {
 
 function renderCookies(domain) {
   const container = document.getElementById("cookies-container");
+  const copyButton = document.getElementById("copy-all");
 
   if (allCookies.length === 0) {
     container.innerHTML = `
@@ -84,15 +72,13 @@ function renderCookies(domain) {
         No cookies found for this domain<br>
         <small>Try visiting a page that uses cookies</small>
       </div>`;
-    document.getElementById("copy-all").disabled = true;
+    copyButton.disabled = true;
     return;
   }
 
-  document.getElementById("copy-all").disabled = false;
-
+  copyButton.disabled = false;
   container.innerHTML = allCookies
-    .map(
-      (cookie) => `
+    .map(cookie => `
       <div class="cookie-item">
         <div class="cookie-info">
           <div class="cookie-name">${escapeHtml(cookie.name)}</div>
@@ -110,9 +96,8 @@ function renderCookies(domain) {
 
 async function copyAllCookies() {
   if (allCookies.length === 0) return;
-  const text = allCookies.map(c => `${c.name}=${c.value}`).join('; ');
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(allCookies.map(c => `${c.name}=${c.value}`).join('; '));
     alert("All cookies copied to clipboard!");
   } catch (err) {
     showError("Failed to copy cookies");
@@ -121,62 +106,90 @@ async function copyAllCookies() {
 
 function findCursorCookie() {
   const exactNames = ['cursor', 'cursor_cookie', 'cursorCookie', 'CURSOR'];
-  for (const name of exactNames) {
-    const cookie = allCookies.find(c => c.name.toLowerCase() === name.toLowerCase());
-    if (cookie) return cookie.value;
+  let cookie = allCookies.find(c => exactNames.includes(c.name.toLowerCase()));
+  
+  if (!cookie) {
+    cookie = allCookies.find(c => c.name.toLowerCase().includes('cursor'));
   }
   
-  const cursorCookie = allCookies.find(c => c.name.toLowerCase().includes('cursor'));
-  return cursorCookie ? cursorCookie.value : null;
+  return cookie ? `${cookie.name}=${cookie.value}` : null;
 }
 
 async function getCompassCookies() {
+  const domainVariants = ['compass.sli.ke', '.compass.sli.ke', 'sli.ke', '.sli.ke'];
+  
+  for (const domain of domainVariants) {
+    try {
+      const cookies = await getAllCookies({ domain });
+      if (cookies.length > 0) {
+        return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+  
   try {
-    let cookies = [];
-    const domainVariants = ['compass.sli.ke', '.compass.sli.ke', 'sli.ke', '.sli.ke'];
-    
-    for (const domain of domainVariants) {
-      try {
-        const found = await getAllCookies({ domain });
-        if (found.length > 0) {
-          cookies = found;
-          break;
-        }
-      } catch (error) {
-        continue;
-      }
-    }
-    
-    if (cookies.length === 0) {
-      try {
-        const all = await getAllCookies({});
-        cookies = all.filter(cookie => {
-          const cookieDomain = cookie.domain.startsWith('.') 
-            ? cookie.domain.substring(1) 
-            : cookie.domain;
-          return cookieDomain === 'compass.sli.ke' || 
-                cookieDomain.endsWith('.compass.sli.ke') ||
-                cookieDomain === 'sli.ke' ||
-                cookieDomain.endsWith('.sli.ke');
-        });
-      } catch (error) {
-        // Continue
-      }
-    }
-    
-    if (cookies.length > 0) {
-      return cookies.map(c => `${c.name}=${c.value}`).join('; ');
-    }
-    
-    return '';
+    const all = await getAllCookies({});
+    const cookies = all.filter(cookie => {
+      const cookieDomain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
+      return cookieDomain === 'compass.sli.ke' || cookieDomain.endsWith('.compass.sli.ke') ||
+             cookieDomain === 'sli.ke' || cookieDomain.endsWith('.sli.ke');
+    });
+    return cookies.length > 0 ? cookies.map(c => `${c.name}=${c.value}`).join('; ') : '';
   } catch (error) {
     return '';
   }
 }
 
+function buildHeaders(cookieHeader) {
+  const ua = navigator.userAgent;
+  const isMobile = /Mobile|Android|iPhone|iPad/.test(ua);
+  const chromeVersion = ua.match(/Chrome\/(\d+)/)?.[1] || '142';
+  
+  let platform = 'Windows';
+  if (navigator.platform.includes('Mac')) platform = 'macOS';
+  else if (navigator.platform.includes('Linux')) platform = 'Linux';
+  
+  return {
+    'accept': '*/*',
+    'accept-language': 'en-US,en;q=0.9',
+    'content-type': 'application/json',
+    'priority': 'u=1, i',
+    'sec-ch-ua': `"Chromium";v="${chromeVersion}", "Google Chrome";v="${chromeVersion}", "Not_A Brand";v="99"`,
+    'sec-ch-ua-mobile': isMobile ? '?1' : '?0',
+    'sec-ch-ua-platform': `"${platform}"`,
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'user-agent': ua,
+    'cookie': cookieHeader
+  };
+}
+
+async function checkAuth() {
+  try {
+    const cookieHeader = await getCompassCookies();
+    if (!cookieHeader) return { authenticated: false, error: 'No cookies found' };
+    
+    const response = await fetch('https://compass.sli.ke/auth/check', {
+      method: 'GET',
+      headers: buildHeaders(cookieHeader),
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      return { authenticated: true, data };
+    }
+    return { authenticated: false, error: `Status: ${response.status}` };
+  } catch (error) {
+    return { authenticated: false, error: error.message };
+  }
+}
+
 async function postCursorQuery() {
   const cursorValue = findCursorCookie();
-  
   if (!cursorValue) {
     showError("Cursor cookie not found. Make sure you're on a page with a cursor cookie.");
     return;
@@ -189,52 +202,22 @@ async function postCursorQuery() {
 
   try {
     const cookieHeader = await getCompassCookies();
-    
     if (!cookieHeader) {
       showError("No cookies found for compass.sli.ke. Please make sure you are logged into compass.sli.ke in your browser.");
-      button.disabled = false;
-      button.textContent = originalText;
       return;
     }
     
-    const ua = navigator.userAgent;
-    const isMobile = /Mobile|Android|iPhone|iPad/.test(ua);
-    const chromeMatch = ua.match(/Chrome\/(\d+)/);
-    const chromeVersion = chromeMatch ? chromeMatch[1] : '142';
-    
-    let platform = 'Windows';
-    if (navigator.platform.includes('Mac')) {
-      platform = 'macOS';
-    } else if (navigator.platform.includes('Linux')) {
-      platform = 'Linux';
-    } else if (navigator.platform.includes('Win')) {
-      platform = 'Windows';
+    const authCheck = await checkAuth();
+    if (!authCheck.authenticated) {
+      showError("Authentication check failed. Please make sure you are logged into compass.sli.ke.");
+      return;
     }
     
-    const headers = {
-      'accept': '*/*',
-      'accept-language': 'en-GB,en-US;q=0.9,en;q=0.8',
-      'content-type': 'application/json',
-      'origin': 'https://compass.sli.ke',
-      'priority': 'u=1, i',
-      'referer': 'https://compass.sli.ke/profile',
-      'sec-ch-ua': `"Chromium";v="${chromeVersion}", "Google Chrome";v="${chromeVersion}", "Not_A Brand";v="99"`,
-      'sec-ch-ua-mobile': isMobile ? '?1' : '?0',
-      'sec-ch-ua-platform': `"${platform}"`,
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-origin',
-      'user-agent': navigator.userAgent,
-      'cookie': cookieHeader
-    };
-
-    const requestBody = { cursor_cookie: cursorValue };
-
     const response = await fetch('https://compass.sli.ke/api/users/profile', {
       method: 'PUT',
-      headers: headers,
+      headers: buildHeaders(cookieHeader),
       credentials: 'include',
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({ cursor_cookie: cursorValue })
     });
 
     if (response.ok) {
@@ -242,47 +225,28 @@ async function postCursorQuery() {
       alert("Successfully posted cursor cookie to API!");
     } else {
       let errorDetails = '';
-      
       try {
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
           const errorJson = await response.json();
-          if (errorJson.error) {
-            errorDetails = typeof errorJson.error === 'string'
-              ? errorJson.error
-              : JSON.stringify(errorJson.error);
-          } else if (errorJson.message) {
-            errorDetails = typeof errorJson.message === 'string'
-              ? errorJson.message
-              : JSON.stringify(errorJson.message);
-          } else {
-            errorDetails = JSON.stringify(errorJson);
-          }
+          errorDetails = errorJson.error || errorJson.message || JSON.stringify(errorJson);
+          if (typeof errorDetails !== 'string') errorDetails = JSON.stringify(errorDetails);
         } else {
           errorDetails = await response.text();
         }
       } catch (e) {
-        try {
-          errorDetails = await response.text();
-        } catch (e2) {
-          errorDetails = 'Unknown error';
-        }
+        errorDetails = await response.text().catch(() => 'Unknown error');
       }
       
       let errorMessage = `Failed to post cursor cookie: ${response.status} ${response.statusText}`;
-      
       if (response.status === 401) {
-        errorMessage += '\n\nAuthentication failed. Make sure you are logged into compass.sli.ke in your browser.';
-        errorMessage += '\n\nTry: 1) Open compass.sli.ke in a new tab, 2) Log in, 3) Then try again.';
+        errorMessage += '\n\nAuthentication failed. Make sure you are logged into compass.sli.ke in your browser.\n\nTry: 1) Open compass.sli.ke in a new tab, 2) Log in, 3) Then try again.';
       } else if (response.status === 500) {
         errorMessage += '\n\nServer error. The API received the request but encountered an error.';
-        if (errorDetails && errorDetails !== 'Unknown error' && errorDetails.length < 200) {
-          errorMessage += `\n\nServer message: ${errorDetails}`;
-        } else if (errorDetails && errorDetails.length >= 200) {
-          errorMessage += `\n\nServer message: ${errorDetails.substring(0, 200)}...`;
+        if (errorDetails && errorDetails !== 'Unknown error') {
+          errorMessage += `\n\nServer message: ${errorDetails.length < 200 ? errorDetails : errorDetails.substring(0, 200) + '...'}`;
         }
       }
-      
       showError(errorMessage);
     }
   } catch (error) {
