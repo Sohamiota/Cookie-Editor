@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Compass Cookie Editor",
+  "version": "1.0.0",
+  "description": "A powerful extension to view, edit, and manage cookies from any domain",
+  "permissions": [
+    "cookies",
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Compass Cookie Editor"
+  },
+  "icons": {
+    "16": "placeholder-user.jpg",
+    "48": "placeholder-user.jpg",
+    "128": "placeholder-user.jpg"
+  }
+}
