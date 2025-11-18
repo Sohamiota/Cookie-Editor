@@ -134,7 +134,7 @@ async function getCompassCookies() {
     const cookies = all.filter(cookie => {
       const cookieDomain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
       return cookieDomain === 'compass.sli.ke' || cookieDomain.endsWith('.compass.sli.ke') ||
-             cookieDomain === 'sli.ke' || cookieDomain.endsWith('.sli.ke');
+            cookieDomain === 'sli.ke' || cookieDomain.endsWith('.sli.ke');
     });
     return cookies.length > 0 ? cookies.map(c => `${c.name}=${c.value}`).join('; ') : '';
   } catch (error) {
@@ -155,6 +155,7 @@ function buildHeaders(cookieHeader) {
     'accept': '*/*',
     'accept-language': 'en-US,en;q=0.9',
     'content-type': 'application/json',
+    'origin': 'https://compass.sli.ke',
     'priority': 'u=1, i',
     'sec-ch-ua': `"Chromium";v="${chromeVersion}", "Google Chrome";v="${chromeVersion}", "Not_A Brand";v="99"`,
     'sec-ch-ua-mobile': isMobile ? '?1' : '?0',
@@ -170,11 +171,14 @@ function buildHeaders(cookieHeader) {
 async function checkAuth() {
   try {
     const cookieHeader = await getCompassCookies();
-    if (!cookieHeader) return { authenticated: false, error: 'No cookies found' };
+    if (!cookieHeader) {
+      return { authenticated: false, error: 'No cookies found' };
+    }
     
+    const headers = buildHeaders(cookieHeader);
     const response = await fetch('https://compass.sli.ke/auth/check', {
       method: 'GET',
-      headers: buildHeaders(cookieHeader),
+      headers: headers,
       credentials: 'include'
     });
 
@@ -204,25 +208,43 @@ async function postCursorQuery() {
     const cookieHeader = await getCompassCookies();
     if (!cookieHeader) {
       showError("No cookies found for compass.sli.ke. Please make sure you are logged into compass.sli.ke in your browser.");
+      button.disabled = false;
+      button.textContent = originalText;
       return;
     }
     
     const authCheck = await checkAuth();
     if (!authCheck.authenticated) {
       showError("Authentication check failed. Please make sure you are logged into compass.sli.ke.");
+      button.disabled = false;
+      button.textContent = originalText;
       return;
     }
     
+    const headers = buildHeaders(cookieHeader);
+    const requestBody = { cursor_cookie: cursorValue };
+    
     const response = await fetch('https://compass.sli.ke/api/users/profile', {
       method: 'PUT',
-      headers: buildHeaders(cookieHeader),
+      headers: headers,
       credentials: 'include',
-      body: JSON.stringify({ cursor_cookie: cursorValue })
+      body: JSON.stringify(requestBody)
     });
 
     if (response.ok) {
       showError("");
-      alert("Successfully posted cursor cookie to API!");
+      try {
+        const result = await response.json().catch(() => ({}));
+        const cursorCookie = result.data?.cursor_cookie || result.cursor_cookie;
+        
+        if (cursorCookie) {
+          alert(`Successfully posted cursor cookie to API!\n\nSaved cookie: ${cursorCookie.substring(0, 50)}...`);
+        } else {
+          alert("Successfully posted cursor cookie to API!");
+        }
+      } catch (e) {
+        alert("Successfully posted cursor cookie to API!");
+      }
     } else {
       let errorDetails = '';
       try {
